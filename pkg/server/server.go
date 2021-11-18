@@ -348,13 +348,13 @@ func (s *BgpServer) Serve() {
 	s.listeners = make([]*tcpListener, 0, 2)
 
 	handlefsmMsg := func(e *fsmMsg) {
-		fsm := e.fsm
-		if fsm.h.ctx.Err() != nil {
+		//fsm := e.fsm
+		/*if fsm.ctx.Err() != nil {
 			// canceled
 			addr := fsm.pConf.State.NeighborAddress
 			state := fsm.state
 
-			fsm.h.wg.Wait()
+			fsm.wg.Wait()
 
 			log.WithFields(log.Fields{
 				"Topic": "Peer",
@@ -382,7 +382,7 @@ func (s *BgpServer) Serve() {
 				s.shutdownWG.Done()
 			}
 			return
-		}
+		}*/
 
 		peer, found := s.neighborMap[e.MsgSrc]
 		if !found {
@@ -3055,7 +3055,7 @@ func (s *BgpServer) deleteNeighbor(c *config.Neighbor, code, subcode uint8) erro
 
 	n.stopPeerRestarting()
 	n.fsm.notification <- bgp.NewBGPNotificationMessage(code, subcode, nil)
-	n.fsm.h.ctxCancel()
+	//n.fsm.h.ctxCancel()
 
 	delete(s.neighborMap, addr)
 	s.propagateUpdate(n, n.DropAll(n.configuredRFlist()))

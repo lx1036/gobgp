@@ -149,7 +149,7 @@ func main() {
 	}
 
 	log.Info("gobgpd started")
-	bgpServer := server.NewBgpServer(server.GrpcListenAddress(opts.GrpcHosts), server.GrpcOption(grpcOpts))
+	bgpServer := server.NewBgpServer(server.GrpcListenAddress(opts.GrpcHosts), server.GrpcOption(grpcOpts)) // localhost:50051
 	go bgpServer.Serve()
 
 	if opts.UseSdNotify {

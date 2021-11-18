@@ -1186,6 +1186,7 @@ func modNeighbor(cmdType string, args []string) error {
 		params["as"] = paramSingle
 		params["family"] = paramSingle
 		params["vrf"] = paramSingle
+		params["port"] = paramSingle
 		params["route-reflector-client"] = paramSingle
 		params["route-server-client"] = paramFlag
 		params["allow-own-as"] = paramSingle
@@ -1227,6 +1228,7 @@ func modNeighbor(cmdType string, args []string) error {
 				State:          &api.PeerState{},
 				RouteServer:    &api.RouteServer{},
 				RouteReflector: &api.RouteReflector{},
+				Transport:      &api.Transport{},
 			}
 			if unnumbered {
 				peer.Conf.NeighborInterface = m["interface"][0]
@@ -1274,6 +1276,12 @@ func modNeighbor(cmdType string, args []string) error {
 				peer.RouteReflector.RouteReflectorClusterId = option[0]
 			}
 		}
+		if _, ok := m["port"]; ok {
+			port, _ := strconv.Atoi(m["port"][0])
+			peer.Transport.RemotePort = uint32(port)
+			peer.Transport.PassiveMode = true
+		}
+
 		if _, ok := m["route-server-client"]; ok {
 			peer.RouteServer.RouteServerClient = true
 		}

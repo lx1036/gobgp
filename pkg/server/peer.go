@@ -16,6 +16,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"time"
@@ -549,9 +550,9 @@ func (peer *peer) handleUpdate(e *fsmMsg) ([]*table.Path, []bgp.RouteFamily, *bg
 }
 
 func (peer *peer) startFSMHandler() {
-	handler := newFSMHandler(peer.fsm, peer.fsm.outgoingCh)
 	peer.fsm.lock.Lock()
-	peer.fsm.h = handler
+	peer.fsm.wg.Add(1)
+	go peer.fsm.start(context.TODO(), peer.fsm.wg)
 	peer.fsm.lock.Unlock()
 }
 

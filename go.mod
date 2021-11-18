@@ -19,6 +19,7 @@ require (
 	github.com/vishvananda/netlink v1.1.1-0.20210330154013-f5de75959ad5
 	golang.org/x/net v0.0.0-20210813160813-60bc85c4be6d
 	google.golang.org/grpc v1.21.1
+	k8s.io/klog/v2 v2.9.0
 )
 
 go 1.13

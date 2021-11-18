@@ -26,6 +26,7 @@ import (
 
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/any"
+	anypb "github.com/golang/protobuf/ptypes/any"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -523,6 +524,7 @@ func TestMonitor(test *testing.T) {
 	}
 	ch := make(chan struct{})
 	go t.MonitorPeer(context.Background(), &api.MonitorPeerRequest{}, func(peer *api.Peer) {
+		log.Info("liuxiang ", peer.String())
 		if peer.State.SessionState == api.PeerState_ESTABLISHED {
 			close(ch)
 		}
@@ -875,6 +877,27 @@ func TestPeerGroup(test *testing.T) {
 	})
 	assert.Nil(err)
 	defer s.StopBgp(context.Background(), &api.StopBgpRequest{})
+
+	nlri, _ := ptypes.MarshalAny(&api.IPAddressPrefix{
+		Prefix:    "10.20.30.40",
+		PrefixLen: 32,
+	})
+	a1, _ := ptypes.MarshalAny(&api.OriginAttribute{
+		Origin: 0,
+	})
+	a2, _ := ptypes.MarshalAny(&api.NextHopAttribute{
+		NextHop: "1.1.1.1",
+	})
+	attrs := []*anypb.Any{a1, a2}
+	s.AddPath(context.TODO(), &api.AddPathRequest{
+		//TableType: 0,
+		//VrfId:     "",
+		Path: &api.Path{
+			Family: &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST},
+			Nlri:   nlri,
+			Pattrs: attrs,
+		},
+	})
 
 	g := &config.PeerGroup{
 		Config: config.PeerGroupConfig{
