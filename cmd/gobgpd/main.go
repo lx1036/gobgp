@@ -17,26 +17,19 @@
 package main
 
 import (
-	"fmt"
-	"io/ioutil"
-	"net/http"
+	"k8s.io/klog/v2"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 
 	"github.com/coreos/go-systemd/daemon"
 	"github.com/jessevdk/go-flags"
-	"github.com/kr/pretty"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 
 	api "github.com/osrg/gobgp/api"
-	"github.com/osrg/gobgp/internal/pkg/version"
-	"github.com/osrg/gobgp/pkg/config"
 	"github.com/osrg/gobgp/pkg/server"
 )
 
@@ -53,7 +46,7 @@ func main() {
 		Facility        string `long:"syslog-facility" description:"specify syslog facility"`
 		DisableStdlog   bool   `long:"disable-stdlog" description:"disable standard logging"`
 		CPUs            int    `long:"cpus" description:"specify the number of CPUs to be used"`
-		GrpcHosts       string `long:"api-hosts" description:"specify the hosts that gobgpd listens on" default:":50051"`
+		GrpcHosts       string `long:"api-hosts" description:"specify the hosts that gobgpd listens on" default:":50052"`
 		GracefulRestart bool   `short:"r" long:"graceful-restart" description:"flag restart-state in graceful-restart capability"`
 		Dry             bool   `short:"d" long:"dry-run" description:"check configuration"`
 		PProfHost       string `long:"pprof-host" description:"specify the host that gobgpd listens on for pprof" default:"localhost:6060"`
@@ -68,109 +61,22 @@ func main() {
 	if err != nil {
 		os.Exit(1)
 	}
-
-	if opts.Version {
-		fmt.Println("gobgpd version", version.Version())
-		os.Exit(0)
+	if len(opts.ConfigFile) == 0 {
+		klog.Fatal("config-file is required")
 	}
 
-	if opts.CPUs == 0 {
-		runtime.GOMAXPROCS(runtime.NumCPU())
-	} else {
-		if runtime.NumCPU() < opts.CPUs {
-			log.Errorf("Only %d CPUs are available but %d is specified", runtime.NumCPU(), opts.CPUs)
-			os.Exit(1)
-		}
-		runtime.GOMAXPROCS(opts.CPUs)
-	}
+	log.SetLevel(log.DebugLevel)
+	log.SetOutput(os.Stdout)
+	log.SetFormatter(&log.JSONFormatter{})
 
-	if !opts.PProfDisable {
-		go func() {
-			log.Println(http.ListenAndServe(opts.PProfHost, nil))
-		}()
-	}
-
-	switch opts.LogLevel {
-	case "debug":
-		log.SetLevel(log.DebugLevel)
-	case "info":
-		log.SetLevel(log.InfoLevel)
-	default:
-		log.SetLevel(log.InfoLevel)
-	}
-
-	if opts.DisableStdlog {
-		log.SetOutput(ioutil.Discard)
-	} else {
-		log.SetOutput(os.Stdout)
-	}
-
-	if opts.UseSyslog != "" {
-		if err := addSyslogHook(opts.UseSyslog, opts.Facility); err != nil {
-			log.Error("Unable to connect to syslog daemon, ", opts.UseSyslog)
-		}
-	}
-
-	if opts.LogPlain {
-		if opts.DisableStdlog {
-			log.SetFormatter(&log.TextFormatter{
-				DisableColors: true,
-			})
-		}
-	} else {
-		log.SetFormatter(&log.JSONFormatter{})
-	}
-
-	if opts.Dry {
-		c, err := config.ReadConfigFile(opts.ConfigFile, opts.ConfigType)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"Topic": "Config",
-				"Error": err,
-			}).Fatalf("Can't read config file %s", opts.ConfigFile)
-		}
-		log.WithFields(log.Fields{
-			"Topic": "Config",
-		}).Info("Finished reading the config file")
-		if opts.LogLevel == "debug" {
-			pretty.Println(c)
-		}
-		os.Exit(0)
-	}
-
-	maxSize := 256 << 20
+	maxSize := 256 << 20 // 256MB
 	grpcOpts := []grpc.ServerOption{grpc.MaxRecvMsgSize(maxSize), grpc.MaxSendMsgSize(maxSize)}
-	if opts.TLS {
-		creds, err := credentials.NewServerTLSFromFile(opts.TLSCertFile, opts.TLSKeyFile)
-		if err != nil {
-			log.Fatalf("Failed to generate credentials: %v", err)
-		}
-		grpcOpts = append(grpcOpts, grpc.Creds(creds))
-	}
-
 	log.Info("gobgpd started")
 	bgpServer := server.NewBgpServer(server.GrpcListenAddress(opts.GrpcHosts), server.GrpcOption(grpcOpts)) // localhost:50051
 	go bgpServer.Serve()
+	defer stopServer(bgpServer, opts.UseSdNotify)
 
-	if opts.UseSdNotify {
-		if status, err := daemon.SdNotify(false, daemon.SdNotifyReady); !status {
-			if err != nil {
-				log.Warnf("Failed to send notification via sd_notify(): %s", err)
-			} else {
-				log.Warnf("The socket sd_notify() isn't available")
-			}
-		}
-	}
-
-	if opts.ConfigFile == "" {
-		<-sigCh
-		stopServer(bgpServer, opts.UseSdNotify)
-		return
-	}
-
-	signal.Notify(sigCh, syscall.SIGHUP)
-
-	initialConfig, err := config.ReadConfigFile(opts.ConfigFile, opts.ConfigType)
+	initialConfig, err := ReadConfigFile(opts.ConfigFile, opts.ConfigType)
 	if err != nil {
 		log.WithFields(log.Fields{
 			"Topic": "Config",
@@ -181,7 +87,7 @@ func main() {
 		"Topic": "Config",
 	}).Info("Finished reading the config file")
 
-	currentConfig, err := config.InitialConfig(context.Background(), bgpServer, initialConfig, opts.GracefulRestart)
+	currentConfig, err := InitialConfig(context.Background(), bgpServer, initialConfig, opts.GracefulRestart)
 	if err != nil {
 		log.WithFields(log.Fields{
 			"Topic": "Config",
@@ -189,6 +95,7 @@ func main() {
 		}).Fatalf("Failed to apply initial configuration %s", opts.ConfigFile)
 	}
 
+	signal.Notify(sigCh, syscall.SIGHUP)
 	for sig := range sigCh {
 		if sig != syscall.SIGHUP {
 			stopServer(bgpServer, opts.UseSdNotify)
@@ -198,7 +105,7 @@ func main() {
 		log.WithFields(log.Fields{
 			"Topic": "Config",
 		}).Info("Reload the config file")
-		newConfig, err := config.ReadConfigFile(opts.ConfigFile, opts.ConfigType)
+		newConfig, err := ReadConfigFile(opts.ConfigFile, opts.ConfigType)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"Topic": "Config",
@@ -207,7 +114,7 @@ func main() {
 			continue
 		}
 
-		currentConfig, err = config.UpdateConfig(context.Background(), bgpServer, currentConfig, newConfig)
+		currentConfig, err = UpdateConfig(context.Background(), bgpServer, currentConfig, newConfig)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"Topic": "Config",

@@ -1,4 +1,4 @@
-package config
+package main
 
 import (
 	"github.com/golang/protobuf/ptypes/any"
@@ -197,54 +197,6 @@ func InitialConfig(ctx context.Context, bgpServer *server.BgpServer, newConfig *
 		log.Fatal("collector feature is not supported")
 	}
 
-	for _, c := range newConfig.RpkiServers {
-		if err := bgpServer.AddRpki(ctx, &api.AddRpkiRequest{
-			Address:  c.Config.Address,
-			Port:     c.Config.Port,
-			Lifetime: c.Config.RecordLifetime,
-		}); err != nil {
-			log.Fatalf("failed to set rpki config: %s", err)
-		}
-	}
-	for _, c := range newConfig.BmpServers {
-		if err := bgpServer.AddBmp(ctx, &api.AddBmpRequest{
-			Address:           c.Config.Address,
-			Port:              c.Config.Port,
-			SysName:           c.Config.SysName,
-			SysDescr:          c.Config.SysDescr,
-			Policy:            api.AddBmpRequest_MonitoringPolicy(c.Config.RouteMonitoringPolicy.ToInt()),
-			StatisticsTimeout: int32(c.Config.StatisticsTimeout),
-		}); err != nil {
-			log.Fatalf("failed to set bmp config: %s", err)
-		}
-	}
-	for _, vrf := range newConfig.Vrfs {
-		rd, err := bgp.ParseRouteDistinguisher(vrf.Config.Rd)
-		if err != nil {
-			log.Fatalf("failed to load vrf rd config: %s", err)
-		}
-
-		importRtList, err := marshalRouteTargets(vrf.Config.ImportRtList)
-		if err != nil {
-			log.Fatalf("failed to load vrf import rt config: %s", err)
-		}
-		exportRtList, err := marshalRouteTargets(vrf.Config.ExportRtList)
-		if err != nil {
-			log.Fatalf("failed to load vrf export rt config: %s", err)
-		}
-
-		if err := bgpServer.AddVrf(ctx, &api.AddVrfRequest{
-			Vrf: &api.Vrf{
-				Name:     vrf.Config.Name,
-				Rd:       apiutil.MarshalRD(rd),
-				Id:       uint32(vrf.Config.Id),
-				ImportRt: importRtList,
-				ExportRt: exportRtList,
-			},
-		}); err != nil {
-			log.Fatalf("failed to set vrf config: %s", err)
-		}
-	}
 	for _, c := range newConfig.MrtDump {
 		if len(c.Config.FileName) == 0 {
 			continue

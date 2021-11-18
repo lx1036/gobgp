@@ -432,76 +432,55 @@ func (s *server) AddPathStream(stream api.GobgpApi_AddPathStreamServer) error {
 }
 
 func (s *server) AddBmp(ctx context.Context, r *api.AddBmpRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.AddBmp(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) DeleteBmp(ctx context.Context, r *api.DeleteBmpRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.DeleteBmp(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) AddRpki(ctx context.Context, r *api.AddRpkiRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.AddRpki(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) DeleteRpki(ctx context.Context, r *api.DeleteRpkiRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.DeleteRpki(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) EnableRpki(ctx context.Context, r *api.EnableRpkiRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.EnableRpki(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) DisableRpki(ctx context.Context, r *api.DisableRpkiRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.DisableRpki(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) ResetRpki(ctx context.Context, r *api.ResetRpkiRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.ResetRpki(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) ListRpki(r *api.ListRpkiRequest, stream api.GobgpApi_ListRpkiServer) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	fn := func(r *api.Rpki) {
-		if err := stream.Send(&api.ListRpkiResponse{Server: r}); err != nil {
-			cancel()
-		}
-	}
-	return s.bgpServer.ListRpki(ctx, r, fn)
+	return nil
 }
 
 func (s *server) ListRpkiTable(r *api.ListRpkiTableRequest, stream api.GobgpApi_ListRpkiTableServer) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	fn := func(r *api.Roa) {
-		if err := stream.Send(&api.ListRpkiTableResponse{Roa: r}); err != nil {
-			cancel()
-		}
-	}
-	return s.bgpServer.ListRpkiTable(ctx, r, fn)
+	return nil
 }
 
 func (s *server) EnableZebra(ctx context.Context, r *api.EnableZebraRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.EnableZebra(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) ListVrf(r *api.ListVrfRequest, stream api.GobgpApi_ListVrfServer) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	fn := func(v *api.Vrf) {
-		if err := stream.Send(&api.ListVrfResponse{Vrf: v}); err != nil {
-			cancel()
-		}
-	}
-	return s.bgpServer.ListVrf(ctx, r, fn)
+	return nil
 }
 
 func (s *server) AddVrf(ctx context.Context, r *api.AddVrfRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.AddVrf(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) DeleteVrf(ctx context.Context, r *api.DeleteVrfRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.DeleteVrf(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func readMpGracefulRestartFromAPIStruct(c *config.MpGracefulRestart, a *api.MpGracefulRestart) {

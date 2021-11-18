@@ -165,7 +165,6 @@ func TestReadAll(t *testing.T) {
 }
 
 func TestFSMHandlerOpensent_HoldTimerExpired(t *testing.T) {
-	assert := assert.New(t)
 	m := NewMockConnection(t)
 
 	p := makePeer()
@@ -178,11 +177,11 @@ func TestFSMHandlerOpensent_HoldTimerExpired(t *testing.T) {
 
 	state, _ := p.fsm.opensent(context.Background())
 
-	assert.Equal(bgp.BGP_FSM_IDLE, state)
+	assert.Equal(t, bgp.BGP_FSM_IDLE, state)
 	lastMsg := m.sendBuf[len(m.sendBuf)-1]
 	sent, _ := bgp.ParseBGPMessage(lastMsg)
-	assert.Equal(uint8(bgp.BGP_MSG_NOTIFICATION), sent.Header.Type)
-	assert.Equal(uint8(bgp.BGP_ERROR_HOLD_TIMER_EXPIRED), sent.Body.(*bgp.BGPNotification).ErrorCode)
+	assert.Equal(t, uint8(bgp.BGP_MSG_NOTIFICATION), sent.Header.Type)
+	assert.Equal(t, uint8(bgp.BGP_ERROR_HOLD_TIMER_EXPIRED), sent.Body.(*bgp.BGPNotification).ErrorCode)
 }
 
 func TestFSMHandlerOpenconfirm_HoldTimerExpired(t *testing.T) {
@@ -292,44 +291,38 @@ func TestFSMHandlerEstablish_HoldTimerExpired_GR_Enabled(t *testing.T) {
 
 func TestFSMHandlerOpenconfirm_HoldtimeZero(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	assert := assert.New(t)
 	m := NewMockConnection(t)
 
 	p := makePeer()
 
 	// push mock connection
 	p.fsm.conn = m
-
 	// set up keepalive ticker
 	p.fsm.pConf.Timers.Config.KeepaliveInterval = 1
 	// set holdtime
 	p.fsm.pConf.Timers.State.NegotiatedHoldTime = 0
-	go p.fsm.openconfirm(context.Background())
 
+	go p.fsm.openconfirm(context.Background())
 	time.Sleep(100 * time.Millisecond)
 
-	assert.Equal(0, len(m.sendBuf))
+	assert.Equal(t, 0, len(m.sendBuf))
 
 }
 
 func TestFSMHandlerEstablished_HoldtimeZero(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	assert := assert.New(t)
 	m := NewMockConnection(t)
 
 	p := makePeer()
-
 	// push mock connection
 	p.fsm.conn = m
-
 	// set holdtime
 	p.fsm.pConf.Timers.State.NegotiatedHoldTime = 0
 
 	go p.fsm.established(context.Background())
-
 	time.Sleep(100 * time.Millisecond)
 
-	assert.Equal(0, len(m.sendBuf))
+	assert.Equal(t, 0, len(m.sendBuf))
 }
 
 func TestCheckOwnASLoop(t *testing.T) {
