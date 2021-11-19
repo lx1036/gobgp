@@ -1266,40 +1266,7 @@ func parseRDRT(rdStr string) (bgp.RouteDistinguisherInterface, bgp.ExtendedCommu
 }
 
 func addVrf(t *testing.T, s *BgpServer, vrfName, rdStr string, importRtsStr []string, exportRtsStr []string, id uint32) {
-	rd, _, err := parseRDRT(rdStr)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	importRts := make([]bgp.ExtendedCommunityInterface, 0, len(importRtsStr))
-	for _, importRtStr := range importRtsStr {
-		_, rt, err := parseRDRT(importRtStr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		importRts = append(importRts, rt)
-	}
-
-	exportRts := make([]bgp.ExtendedCommunityInterface, 0, len(exportRtsStr))
-	for _, exportRtStr := range exportRtsStr {
-		_, rt, err := parseRDRT(exportRtStr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		exportRts = append(exportRts, rt)
-	}
-	req := &api.AddVrfRequest{
-		Vrf: &api.Vrf{
-			Name:     vrfName,
-			ImportRt: apiutil.MarshalRTs(importRts),
-			ExportRt: apiutil.MarshalRTs(exportRts),
-			Rd:       apiutil.MarshalRD(rd),
-			Id:       id,
-		},
-	}
-	if err = s.AddVrf(context.Background(), req); err != nil {
-		t.Fatal(err)
-	}
+	return
 }
 
 func TestDoNotReactToDuplicateRTCMemberships(t *testing.T) {
@@ -1560,30 +1527,6 @@ func TestAddDeletePath(t *testing.T) {
 	assert.Equal(t, len(listRib()), 1)
 	assert.Equal(t, len(s.uuidMap), 1)
 	assert.NotEqual(t, u, r.Uuid)
-	s.StopBgp(context.Background(), &api.StopBgpRequest{})
-}
-
-func TestDeleteNonExistingVrf(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
-
-	s := runNewServer(1, "1.1.1.1", 10179)
-	addVrf(t, s, "vrf1", "111:111", []string{"111:111"}, []string{"111:111"}, 1)
-	req := &api.DeleteVrfRequest{Name: "Invalidvrf"}
-	if err := s.DeleteVrf(context.Background(), req); err == nil {
-		t.Fatal("Did not raise error for invalid vrf deletion.", err)
-	}
-	s.StopBgp(context.Background(), &api.StopBgpRequest{})
-}
-
-func TestDeleteVrf(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
-
-	s := runNewServer(1, "1.1.1.1", 10179)
-	addVrf(t, s, "vrf1", "111:111", []string{"111:111"}, []string{"111:111"}, 1)
-	req := &api.DeleteVrfRequest{Name: "vrf1"}
-	if err := s.DeleteVrf(context.Background(), req); err != nil {
-		t.Fatal("Vrf delete failed", err)
-	}
 	s.StopBgp(context.Background(), &api.StopBgpRequest{})
 }
 

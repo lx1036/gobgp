@@ -396,11 +396,11 @@ func (s *server) DeletePath(ctx context.Context, r *api.DeletePathRequest) (*emp
 }
 
 func (s *server) EnableMrt(ctx context.Context, r *api.EnableMrtRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.EnableMrt(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) DisableMrt(ctx context.Context, r *api.DisableMrtRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.DisableMrt(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) AddPathStream(stream api.GobgpApi_AddPathStreamServer) error {

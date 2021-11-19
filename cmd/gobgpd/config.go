@@ -1,15 +1,12 @@
 package main
 
 import (
-	"github.com/golang/protobuf/ptypes/any"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 
 	api "github.com/osrg/gobgp/api"
-	"github.com/osrg/gobgp/internal/pkg/apiutil"
 	"github.com/osrg/gobgp/internal/pkg/config"
 	"github.com/osrg/gobgp/internal/pkg/table"
-	"github.com/osrg/gobgp/pkg/packet/bgp"
 	"github.com/osrg/gobgp/pkg/server"
 )
 
@@ -17,18 +14,6 @@ import (
 // using InitialConfig and UpdateConfig.
 func ReadConfigFile(configFile, configType string) (*config.BgpConfigSet, error) {
 	return config.ReadConfigfile(configFile, configType)
-}
-
-func marshalRouteTargets(l []string) ([]*any.Any, error) {
-	rtList := make([]*any.Any, 0, len(l))
-	for _, rtString := range l {
-		rt, err := bgp.ParseRouteTarget(rtString)
-		if err != nil {
-			return nil, err
-		}
-		rtList = append(rtList, apiutil.MarshalRT(rt))
-	}
-	return rtList, nil
 }
 
 func assignGlobalpolicy(ctx context.Context, bgpServer *server.BgpServer, a *config.ApplyPolicyConfig) {
@@ -174,42 +159,6 @@ func InitialConfig(ctx context.Context, bgpServer *server.BgpServer, newConfig *
 		log.Fatalf("failed to set global config: %s", err)
 	}
 
-	if newConfig.Zebra.Config.Enabled {
-		tps := newConfig.Zebra.Config.RedistributeRouteTypeList
-		l := make([]string, 0, len(tps))
-		for _, t := range tps {
-			l = append(l, string(t))
-		}
-		if err := bgpServer.EnableZebra(ctx, &api.EnableZebraRequest{
-			Url:                  newConfig.Zebra.Config.Url,
-			RouteTypes:           l,
-			Version:              uint32(newConfig.Zebra.Config.Version),
-			NexthopTriggerEnable: newConfig.Zebra.Config.NexthopTriggerEnable,
-			NexthopTriggerDelay:  uint32(newConfig.Zebra.Config.NexthopTriggerDelay),
-			MplsLabelRangeSize:   uint32(newConfig.Zebra.Config.MplsLabelRangeSize),
-			SoftwareName:         newConfig.Zebra.Config.SoftwareName,
-		}); err != nil {
-			log.Fatalf("failed to set zebra config: %s", err)
-		}
-	}
-
-	if len(newConfig.Collector.Config.Url) > 0 {
-		log.Fatal("collector feature is not supported")
-	}
-
-	for _, c := range newConfig.MrtDump {
-		if len(c.Config.FileName) == 0 {
-			continue
-		}
-		if err := bgpServer.EnableMrt(ctx, &api.EnableMrtRequest{
-			DumpType:         int32(c.Config.DumpType.ToInt()),
-			Filename:         c.Config.FileName,
-			DumpInterval:     c.Config.DumpInterval,
-			RotationInterval: c.Config.RotationInterval,
-		}); err != nil {
-			log.Fatalf("failed to set mrt config: %s", err)
-		}
-	}
 	p := config.ConfigSetToRoutingPolicy(newConfig)
 	rp, err := table.NewAPIRoutingPolicyFromConfigStruct(p)
 	if err != nil {

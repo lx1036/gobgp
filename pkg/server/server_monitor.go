@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	api "github.com/osrg/gobgp/api"
 	"github.com/osrg/gobgp/internal/pkg/config"
 	"github.com/osrg/gobgp/internal/pkg/table"
 	"github.com/osrg/gobgp/pkg/packet/bgp"
@@ -409,4 +411,127 @@ func (s *BgpServer) watch(opts ...watchOption) (w *watcher) {
 		return nil
 	}, false)
 	return w
+}
+
+func (s *BgpServer) MonitorTable(ctx context.Context, r *api.MonitorTableRequest, fn func(*api.Path)) error {
+	if r == nil {
+		return fmt.Errorf("nil request")
+	}
+	w, err := func() (*watcher, error) {
+		switch r.TableType {
+		case api.TableType_GLOBAL:
+			return s.watch(watchBestPath(r.Current)), nil
+		case api.TableType_ADJ_IN:
+			if r.PostPolicy {
+				return s.watch(watchPostUpdate(r.Current, r.Name)), nil
+			}
+			return s.watch(watchUpdate(r.Current, r.Name)), nil
+		default:
+			return nil, fmt.Errorf("unsupported resource type: %v", r.TableType)
+		}
+	}()
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		defer func() {
+			w.Stop()
+		}()
+		family := bgp.RouteFamily(0)
+		if r.Family != nil {
+			family = bgp.AfiSafiToRouteFamily(uint16(r.Family.Afi), uint8(r.Family.Safi))
+		}
+
+		for {
+			select {
+			case ev := <-w.Event():
+				var pl []*table.Path
+				switch msg := ev.(type) {
+				case *watchEventBestPath:
+					if len(msg.MultiPathList) > 0 {
+						l := make([]*table.Path, 0)
+						for _, p := range msg.MultiPathList {
+							l = append(l, p...)
+						}
+						pl = l
+					} else {
+						pl = msg.PathList
+					}
+				case *watchEventUpdate:
+					pl = msg.PathList
+				}
+				for _, path := range pl {
+					if path == nil || (r.Family != nil && family != path.GetRouteFamily()) {
+						continue
+					}
+					if len(r.Name) > 0 && r.Name != path.GetSource().Address.String() {
+						continue
+					}
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						fn(toPathApi(path, nil, false, false))
+					}
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return nil
+}
+
+func (s *BgpServer) MonitorPeer(ctx context.Context, r *api.MonitorPeerRequest, fn func(*api.Peer)) error {
+	if r == nil {
+		return fmt.Errorf("nil request")
+	}
+
+	go func() {
+		// So that both flags are not required, assume that if the
+		// initial_state flag is true, then the caller desires that the initial
+		// state be returned whether or not it is established and regardless of
+		// the value of `current`.
+		current := r.Current || r.InitialState
+		nonEstablished := r.InitialState
+		w := s.watch(watchPeerState(current, nonEstablished))
+		defer func() {
+			w.Stop()
+		}()
+		for {
+			select {
+			case m := <-w.Event():
+				msg := m.(*watchEventPeerState)
+				if len(r.Address) > 0 && r.Address != msg.PeerAddress.String() && r.Address != msg.PeerInterface {
+					break
+				}
+				p := &api.Peer{
+					Conf: &api.PeerConf{
+						PeerAs:            msg.PeerAS,
+						LocalAs:           msg.LocalAS,
+						NeighborAddress:   msg.PeerAddress.String(),
+						NeighborInterface: msg.PeerInterface,
+					},
+					State: &api.PeerState{
+						PeerAs:          msg.PeerAS,
+						LocalAs:         msg.LocalAS,
+						NeighborAddress: msg.PeerAddress.String(),
+						SessionState:    api.PeerState_SessionState(int(msg.State) + 1),
+						AdminState:      api.PeerState_AdminState(msg.AdminState),
+						RouterId:        msg.PeerID.String(),
+					},
+					Transport: &api.Transport{
+						LocalAddress: msg.LocalAddress.String(),
+						LocalPort:    uint32(msg.LocalPort),
+						RemotePort:   uint32(msg.PeerPort),
+					},
+				}
+				fn(p)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return nil
 }

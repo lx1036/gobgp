@@ -3,15 +3,11 @@ package config
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
 	"net"
 	"reflect"
 	"strconv"
 
-	"github.com/osrg/gobgp/internal/pkg/zebra"
 	"github.com/osrg/gobgp/pkg/packet/bgp"
-	"github.com/osrg/gobgp/pkg/packet/bmp"
-	"github.com/osrg/gobgp/pkg/packet/rtr"
 	"github.com/spf13/viper"
 )
 
@@ -124,17 +120,6 @@ func setDefaultNeighborConfigValuesWithViper(v *viper.Viper, n *Neighbor, g *Glo
 	}
 	if !v.IsSet("neighbor.timers.config.idle-hold-time-after-reset") && n.Timers.Config.IdleHoldTimeAfterReset == 0 {
 		n.Timers.Config.IdleHoldTimeAfterReset = float64(DEFAULT_IDLE_HOLDTIME_AFTER_RESET)
-	}
-
-	if n.Config.NeighborInterface != "" {
-		if n.RouteServer.Config.RouteServerClient {
-			return fmt.Errorf("configuring route server client as unnumbered peer is not supported")
-		}
-		addr, err := GetIPv6LinkLocalNeighborAddress(n.Config.NeighborInterface)
-		if err != nil {
-			return err
-		}
-		n.State.NeighborAddress = addr
 	}
 
 	if n.Transport.Config.LocalAddress == "" {
@@ -282,47 +267,6 @@ func SetDefaultGlobalConfigValues(g *Global) error {
 	return nil
 }
 
-func setDefaultVrfConfigValues(v *Vrf) error {
-	if v == nil {
-		return fmt.Errorf("cannot set default values for nil vrf config")
-	}
-
-	if v.Config.Name == "" {
-		return fmt.Errorf("specify vrf name")
-	}
-
-	_, err := bgp.ParseRouteDistinguisher(v.Config.Rd)
-	if err != nil {
-		return fmt.Errorf("invalid rd for vrf %s: %s", v.Config.Name, v.Config.Rd)
-	}
-
-	if len(v.Config.ImportRtList) == 0 {
-		v.Config.ImportRtList = v.Config.BothRtList
-	}
-	for _, rtString := range v.Config.ImportRtList {
-		_, err := bgp.ParseRouteTarget(rtString)
-		if err != nil {
-			return fmt.Errorf("invalid import rt for vrf %s: %s", v.Config.Name, rtString)
-		}
-	}
-
-	if len(v.Config.ExportRtList) == 0 {
-		v.Config.ExportRtList = v.Config.BothRtList
-	}
-	for _, rtString := range v.Config.ExportRtList {
-		_, err := bgp.ParseRouteTarget(rtString)
-		if err != nil {
-			return fmt.Errorf("invalid export rt for vrf %s: %s", v.Config.Name, rtString)
-		}
-	}
-
-	return nil
-}
-
-func SetDefaultConfigValues(b *BgpConfigSet) error {
-	return setDefaultConfigValuesWithViper(nil, b)
-}
-
 func setDefaultPolicyConfigValuesWithViper(v *viper.Viper, p *PolicyDefinition) error {
 	stmts, err := extractArray(v.Get("policy.statements"))
 	if err != nil {
@@ -347,82 +291,6 @@ func setDefaultConfigValuesWithViper(v *viper.Viper, b *BgpConfigSet) error {
 
 	if err := SetDefaultGlobalConfigValues(&b.Global); err != nil {
 		return err
-	}
-
-	bmpSysPrefix := "Gobgp-R"
-	for idx, server := range b.BmpServers {
-		if server.Config.SysName == "" {
-			server.Config.SysName = bmpSysPrefix + strconv.Itoa(idx)
-		}
-		if server.Config.SysDescr == "" {
-			server.Config.SysDescr = "Gobgp Version: master"
-		}
-		if server.Config.Port == 0 {
-			server.Config.Port = bmp.BMP_DEFAULT_PORT
-		}
-		if server.Config.RouteMonitoringPolicy == "" {
-			server.Config.RouteMonitoringPolicy = BMP_ROUTE_MONITORING_POLICY_TYPE_PRE_POLICY
-		}
-		// statistics-timeout is uint16 value and implicitly less than 65536
-		if server.Config.StatisticsTimeout != 0 && server.Config.StatisticsTimeout < 15 {
-			return fmt.Errorf("too small statistics-timeout value: %d", server.Config.StatisticsTimeout)
-		}
-		b.BmpServers[idx] = server
-	}
-
-	vrfNames := make(map[string]struct{})
-	vrfIDs := make(map[uint32]struct{})
-	for idx, vrf := range b.Vrfs {
-		if err := setDefaultVrfConfigValues(&vrf); err != nil {
-			return err
-		}
-
-		if _, ok := vrfNames[vrf.Config.Name]; ok {
-			return fmt.Errorf("duplicated vrf name: %s", vrf.Config.Name)
-		}
-		vrfNames[vrf.Config.Name] = struct{}{}
-
-		if vrf.Config.Id != 0 {
-			if _, ok := vrfIDs[vrf.Config.Id]; ok {
-				return fmt.Errorf("duplicated vrf id: %d", vrf.Config.Id)
-			}
-			vrfIDs[vrf.Config.Id] = struct{}{}
-		}
-
-		b.Vrfs[idx] = vrf
-	}
-	// Auto assign VRF identifier
-	for idx, vrf := range b.Vrfs {
-		if vrf.Config.Id == 0 {
-			for id := uint32(1); id < math.MaxUint32; id++ {
-				if _, ok := vrfIDs[id]; !ok {
-					vrf.Config.Id = id
-					vrfIDs[id] = struct{}{}
-					break
-				}
-			}
-		}
-		b.Vrfs[idx] = vrf
-	}
-
-	if b.Zebra.Config.Url == "" {
-		b.Zebra.Config.Url = "unix:/var/run/quagga/zserv.api"
-	}
-	if b.Zebra.Config.Version < zebra.MinZapiVer {
-		b.Zebra.Config.Version = zebra.MinZapiVer
-	} else if b.Zebra.Config.Version > zebra.MaxZapiVer {
-		b.Zebra.Config.Version = zebra.MaxZapiVer
-	}
-
-	if !v.IsSet("zebra.config.nexthop-trigger-enable") && !b.Zebra.Config.NexthopTriggerEnable && b.Zebra.Config.Version > 2 {
-		b.Zebra.Config.NexthopTriggerEnable = true
-	}
-	if b.Zebra.Config.NexthopTriggerDelay == 0 {
-		b.Zebra.Config.NexthopTriggerDelay = 5
-	}
-
-	if !zebra.IsAllowableSoftwareName(b.Zebra.Config.Version, b.Zebra.Config.SoftwareName) {
-		b.Zebra.Config.SoftwareName = ""
 	}
 
 	list, err := extractArray(v.Get("neighbors"))
@@ -458,12 +326,6 @@ func setDefaultConfigValuesWithViper(v *viper.Viper, b *BgpConfigSet) error {
 	for _, d := range b.DynamicNeighbors {
 		if err := d.validate(b); err != nil {
 			return err
-		}
-	}
-
-	for idx, r := range b.RpkiServers {
-		if r.Config.Port == 0 {
-			b.RpkiServers[idx].Config.Port = rtr.RPKI_DEFAULT_PORT
 		}
 	}
 

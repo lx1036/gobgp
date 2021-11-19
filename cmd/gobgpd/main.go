@@ -21,6 +21,8 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime"
+	"runtime/debug"
 	"syscall"
 
 	"github.com/coreos/go-systemd/daemon"
@@ -33,6 +35,18 @@ import (
 	"github.com/osrg/gobgp/pkg/server"
 )
 
+func init() {
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGUSR1)
+		for range sigCh {
+			runtime.GC()
+			debug.FreeOSMemory()
+		}
+	}()
+}
+
+// go run . -f ./route-server-conf.conf
 func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM)

@@ -18,6 +18,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"k8s.io/klog/v2"
 	"math/rand"
 	"net"
 	"strconv"
@@ -215,7 +216,7 @@ func newFSM(gConf *config.Global, pConf *config.Neighbor) *fsm {
 		wg: &sync.WaitGroup{},
 
 		outgoingCh: make(chan *fsmOutgoingMsg, 1024),
-		incomingCh: make(chan *fsmMsg, 1024),
+		//incomingCh: make(chan *fsmMsg, 1024), // 不要这里实例化，在 server 上层实例化
 
 		gConf:                gConf,
 		pConf:                pConf,
@@ -1288,13 +1289,8 @@ func (fsm *fsm) StateChange(nextState bgp.FSMState) {
 	fsm.lock.Lock()
 	defer fsm.lock.Unlock()
 
-	log.WithFields(log.Fields{
-		"Topic":  "Peer",
-		"Key":    fsm.pConf.State.NeighborAddress,
-		"old":    fsm.state.String(),
-		"new":    nextState.String(),
-		"reason": fsm.reason,
-	}).Debug("state changed")
+	klog.Infof(fmt.Sprintf("[StateChange]state changed, key:%s, old:%s, new:%s, reason:%s",
+		fsm.pConf.State.NeighborAddress, fsm.state.String(), nextState.String(), fsm.reason))
 	fsm.state = nextState
 	switch nextState {
 	case bgp.BGP_FSM_ESTABLISHED:
