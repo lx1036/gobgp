@@ -51,10 +51,10 @@ func SetDefaultNeighborConfigValues(n *Neighbor, pg *PeerGroup, g *Global) error
 		return nil
 	}
 
-	return setDefaultNeighborConfigValuesWithViper(nil, n, g, pg)
+	return SetDefaultNeighborConfigValuesWithViper(nil, n, g)
 }
 
-func setDefaultNeighborConfigValuesWithViper(v *viper.Viper, n *Neighbor, g *Global, pg *PeerGroup) error {
+func SetDefaultNeighborConfigValuesWithViper(v *viper.Viper, n *Neighbor, g *Global) error {
 	if n == nil {
 		return fmt.Errorf("neighbor config is nil")
 	}
@@ -64,12 +64,6 @@ func setDefaultNeighborConfigValuesWithViper(v *viper.Viper, n *Neighbor, g *Glo
 
 	if v == nil {
 		v = viper.New()
-	}
-
-	if pg != nil {
-		if err := OverwriteNeighborConfigWithPeerGroup(n, pg); err != nil {
-			return err
-		}
 	}
 
 	if n.Config.LocalAs == 0 {
@@ -104,23 +98,6 @@ func setDefaultNeighborConfigValuesWithViper(v *viper.Viper, n *Neighbor, g *Glo
 
 	n.State.PeerAs = n.Config.PeerAs
 	n.AsPathOptions.State.AllowOwnAs = n.AsPathOptions.Config.AllowOwnAs
-
-	if !v.IsSet("neighbor.error-handling.config.treat-as-withdraw") {
-		n.ErrorHandling.Config.TreatAsWithdraw = true
-	}
-
-	if !v.IsSet("neighbor.timers.config.connect-retry") && n.Timers.Config.ConnectRetry == 0 {
-		n.Timers.Config.ConnectRetry = float64(DEFAULT_CONNECT_RETRY)
-	}
-	if !v.IsSet("neighbor.timers.config.hold-time") && n.Timers.Config.HoldTime == 0 {
-		n.Timers.Config.HoldTime = float64(DEFAULT_HOLDTIME)
-	}
-	if !v.IsSet("neighbor.timers.config.keepalive-interval") && n.Timers.Config.KeepaliveInterval == 0 {
-		n.Timers.Config.KeepaliveInterval = n.Timers.Config.HoldTime / 3
-	}
-	if !v.IsSet("neighbor.timers.config.idle-hold-time-after-reset") && n.Timers.Config.IdleHoldTimeAfterReset == 0 {
-		n.Timers.Config.IdleHoldTimeAfterReset = float64(DEFAULT_IDLE_HOLDTIME_AFTER_RESET)
-	}
 
 	if n.Transport.Config.LocalAddress == "" {
 		if n.State.NeighborAddress == "" {
@@ -249,25 +226,7 @@ func setDefaultNeighborConfigValuesWithViper(v *viper.Viper, n *Neighbor, g *Glo
 	return nil
 }
 
-func SetDefaultGlobalConfigValues(g *Global) error {
-	if len(g.AfiSafis) == 0 {
-		g.AfiSafis = []AfiSafi{}
-		for k := range AfiSafiTypeToIntMap {
-			g.AfiSafis = append(g.AfiSafis, defaultAfiSafi(k, true))
-		}
-	}
-
-	if g.Config.Port == 0 {
-		g.Config.Port = bgp.BGP_PORT
-	}
-
-	if len(g.Config.LocalAddressList) == 0 {
-		g.Config.LocalAddressList = []string{"0.0.0.0", "::"}
-	}
-	return nil
-}
-
-func setDefaultPolicyConfigValuesWithViper(v *viper.Viper, p *PolicyDefinition) error {
+func SetDefaultPolicyConfigValuesWithViper(v *viper.Viper, p *PolicyDefinition) error {
 	stmts, err := extractArray(v.Get("policy.statements"))
 	if err != nil {
 		return err
@@ -284,99 +243,21 @@ func setDefaultPolicyConfigValuesWithViper(v *viper.Viper, p *PolicyDefinition) 
 	return nil
 }
 
-func setDefaultConfigValuesWithViper(v *viper.Viper, b *BgpConfigSet) error {
-	if v == nil {
-		v = viper.New()
-	}
-
-	if err := SetDefaultGlobalConfigValues(&b.Global); err != nil {
-		return err
-	}
-
-	list, err := extractArray(v.Get("neighbors"))
-	if err != nil {
-		return err
-	}
-
-	for idx, n := range b.Neighbors {
-		vv := viper.New()
-		if len(list) > idx {
-			vv.Set("neighbor", list[idx])
-		}
-
-		pg, err := b.getPeerGroup(n.Config.PeerGroup)
-		if err != nil {
-			return nil
-		}
-
-		if pg != nil {
-			identifier := vv.Get("neighbor.config.neighbor-address")
-			if identifier == nil {
-				identifier = vv.Get("neighbor.config.neighbor-interface")
-			}
-			RegisterConfiguredFields(identifier.(string), list[idx])
-		}
-
-		if err := setDefaultNeighborConfigValuesWithViper(vv, &n, &b.Global, pg); err != nil {
-			return err
-		}
-		b.Neighbors[idx] = n
-	}
-
-	for _, d := range b.DynamicNeighbors {
-		if err := d.validate(b); err != nil {
-			return err
+func SetDefaultGlobalConfigValues(g *Global) error {
+	if len(g.AfiSafis) == 0 {
+		g.AfiSafis = []AfiSafi{}
+		for k := range AfiSafiTypeToIntMap {
+			g.AfiSafis = append(g.AfiSafis, defaultAfiSafi(k, true))
 		}
 	}
 
-	list, err = extractArray(v.Get("policy-definitions"))
-	if err != nil {
-		return err
+	if g.Config.Port == 0 {
+		g.Config.Port = bgp.BGP_PORT
 	}
 
-	for idx, p := range b.PolicyDefinitions {
-		vv := viper.New()
-		if len(list) > idx {
-			vv.Set("policy", list[idx])
-		}
-		if err := setDefaultPolicyConfigValuesWithViper(vv, &p); err != nil {
-			return err
-		}
-		b.PolicyDefinitions[idx] = p
+	if len(g.Config.LocalAddressList) == 0 {
+		g.Config.LocalAddressList = []string{"0.0.0.0", "::"}
 	}
-
-	return nil
-}
-
-func OverwriteNeighborConfigWithPeerGroup(c *Neighbor, pg *PeerGroup) error {
-	v := viper.New()
-
-	val, ok := configuredFields[c.Config.NeighborAddress]
-	if ok {
-		v.Set("neighbor", val)
-	} else {
-		v.Set("neighbor.config.peer-group", c.Config.PeerGroup)
-	}
-
-	overwriteConfig(&c.Config, &pg.Config, "neighbor.config", v)
-	overwriteConfig(&c.Timers.Config, &pg.Timers.Config, "neighbor.timers.config", v)
-	overwriteConfig(&c.Transport.Config, &pg.Transport.Config, "neighbor.transport.config", v)
-	overwriteConfig(&c.ErrorHandling.Config, &pg.ErrorHandling.Config, "neighbor.error-handling.config", v)
-	overwriteConfig(&c.LoggingOptions.Config, &pg.LoggingOptions.Config, "neighbor.logging-options.config", v)
-	overwriteConfig(&c.EbgpMultihop.Config, &pg.EbgpMultihop.Config, "neighbor.ebgp-multihop.config", v)
-	overwriteConfig(&c.RouteReflector.Config, &pg.RouteReflector.Config, "neighbor.route-reflector.config", v)
-	overwriteConfig(&c.AsPathOptions.Config, &pg.AsPathOptions.Config, "neighbor.as-path-options.config", v)
-	overwriteConfig(&c.AddPaths.Config, &pg.AddPaths.Config, "neighbor.add-paths.config", v)
-	overwriteConfig(&c.GracefulRestart.Config, &pg.GracefulRestart.Config, "neighbor.gradeful-restart.config", v)
-	overwriteConfig(&c.ApplyPolicy.Config, &pg.ApplyPolicy.Config, "neighbor.apply-policy.config", v)
-	overwriteConfig(&c.UseMultiplePaths.Config, &pg.UseMultiplePaths.Config, "neighbor.use-multiple-paths.config", v)
-	overwriteConfig(&c.RouteServer.Config, &pg.RouteServer.Config, "neighbor.route-server.config", v)
-	overwriteConfig(&c.TtlSecurity.Config, &pg.TtlSecurity.Config, "neighbor.ttl-security.config", v)
-
-	if !v.IsSet("neighbor.afi-safis") {
-		c.AfiSafis = append([]AfiSafi{}, pg.AfiSafis...)
-	}
-
 	return nil
 }
 

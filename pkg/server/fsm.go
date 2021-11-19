@@ -26,7 +26,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/eapache/channels"
 	"github.com/osrg/gobgp/internal/pkg/config"
 	"github.com/osrg/gobgp/internal/pkg/table"
 	"github.com/osrg/gobgp/pkg/packet/bgp"
@@ -202,7 +201,7 @@ type fsm struct {
 	sentNotification *bgp.BGPMessage
 	stateReasonCh    chan fsmStateReason
 	holdTimerResetCh chan bool
-	msgCh            *channels.InfiniteChannel
+	msgCh            chan *fsmMsg
 }
 
 func newFSM(gConf *config.Global, pConf *config.Neighbor) *fsm {
@@ -216,6 +215,7 @@ func newFSM(gConf *config.Global, pConf *config.Neighbor) *fsm {
 		wg: &sync.WaitGroup{},
 
 		outgoingCh: make(chan *fsmOutgoingMsg, 1024),
+		msgCh:      make(chan *fsmMsg, 1024),
 		//incomingCh: make(chan *fsmMsg, 1024), // 不要这里实例化，在 server 上层实例化
 
 		gConf:                gConf,
@@ -255,10 +255,8 @@ func (fsm *fsm) start(ctx context.Context, wg *sync.WaitGroup) error {
 	switch fsmState {
 	case bgp.BGP_FSM_IDLE:
 		nextState, reason = fsm.idle(ctx)
-		// case bgp.BGP_FSM_CONNECT:
-		// 	nextState = fsm.connect()
 	case bgp.BGP_FSM_ACTIVE:
-		nextState, reason = fsm.active(ctx)
+		nextState, reason = fsm.active(ctx) // 在 active state 和交换机建立 tcp connection
 	case bgp.BGP_FSM_OPENSENT:
 		nextState, reason = fsm.opensent(ctx)
 	case bgp.BGP_FSM_OPENCONFIRM:
@@ -296,7 +294,7 @@ func (fsm *fsm) start(ctx context.Context, wg *sync.WaitGroup) error {
 	fsm.lock.RUnlock()
 
 	fsm.lock.RLock()
-	fsm.incomingCh <- &fsmMsg{
+	fsm.incomingCh <- &fsmMsg{ // idle -> active
 		fsm:         fsm,
 		MsgType:     fsmMsgStateChange,
 		MsgSrc:      fsm.pConf.State.NeighborAddress,
@@ -309,7 +307,7 @@ func (fsm *fsm) start(ctx context.Context, wg *sync.WaitGroup) error {
 
 func (fsm *fsm) idle(ctx context.Context) (bgp.FSMState, *fsmStateReason) {
 	fsm.lock.RLock()
-	idleHoldTimer := time.NewTimer(time.Second * time.Duration(fsm.idleHoldTime))
+	idleHoldTimer := time.NewTimer(time.Second * time.Duration(fsm.idleHoldTime)) // INFO: 起始为0，<-idleHoldTimer.C 会先走
 	fsm.lock.RUnlock()
 
 	for {
@@ -392,7 +390,7 @@ func (fsm *fsm) opensent(ctx context.Context) (bgp.FSMState, *fsmStateReason) {
 	fsm.conn.Write(b)
 	fsm.bgpMessageStateUpdate(m.Header.Type, false)
 
-	fsm.msgCh = channels.NewInfiniteChannel()
+	//fsm.msgCh = channels.NewInfiniteChannel()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -439,12 +437,8 @@ func (fsm *fsm) opensent(ctx context.Context) (bgp.FSMState, *fsmStateReason) {
 				fsm.conn.Close()
 				return bgp.BGP_FSM_IDLE, newfsmStateReason(fsmRestartTimerExpired, nil, nil)
 			}
-		case i, ok := <-fsm.msgCh.Out():
-			if !ok {
-				continue
-			}
-			e := i.(*fsmMsg)
-			switch m := e.MsgData.(type) {
+		case msg := <-fsm.msgCh:
+			switch m := msg.MsgData.(type) {
 			case *bgp.BGPMessage:
 				if m.Header.Type == bgp.BGP_MSG_OPEN {
 					fsm.lock.Lock()
@@ -604,7 +598,7 @@ func (fsm *fsm) opensent(ctx context.Context) (bgp.FSMState, *fsmStateReason) {
 					"Topic": "Peer",
 					"Key":   fsm.pConf.State.NeighborAddress,
 					"State": fsm.state.String(),
-					"Data":  e.MsgData,
+					"Data":  msg.MsgData,
 				}).Panic("unknown msg type")
 			}
 		case err := <-fsm.stateReasonCh:
@@ -635,7 +629,7 @@ func (fsm *fsm) opensent(ctx context.Context) (bgp.FSMState, *fsmStateReason) {
 
 func (fsm *fsm) openconfirm(ctx context.Context) (bgp.FSMState, *fsmStateReason) {
 	ticker := keepaliveTicker(fsm)
-	fsm.msgCh = channels.NewInfiniteChannel()
+	//fsm.msgCh = channels.NewInfiniteChannel()
 	fsm.lock.RLock()
 
 	var wg sync.WaitGroup
@@ -691,12 +685,8 @@ func (fsm *fsm) openconfirm(ctx context.Context) (bgp.FSMState, *fsmStateReason)
 			// TODO: check error
 			fsm.conn.Write(b)
 			fsm.bgpMessageStateUpdate(m.Header.Type, false)
-		case i, ok := <-fsm.msgCh.Out():
-			if !ok {
-				continue
-			}
-			e := i.(*fsmMsg)
-			switch m := e.MsgData.(type) {
+		case msg := <-fsm.msgCh:
+			switch m := msg.MsgData.(type) {
 			case *bgp.BGPMessage:
 				if m.Header.Type == bgp.BGP_MSG_KEEPALIVE {
 					return bgp.BGP_FSM_ESTABLISHED, newfsmStateReason(fsmOpenMsgNegotiated, nil, nil)
@@ -712,7 +702,7 @@ func (fsm *fsm) openconfirm(ctx context.Context) (bgp.FSMState, *fsmStateReason)
 					"Topic": "Peer",
 					"Key":   fsm.pConf.State.NeighborAddress,
 					"State": fsm.state.String(),
-					"Data":  e.MsgData,
+					"Data":  msg.MsgData,
 				}).Panic("unknown msg type")
 			}
 		case err := <-fsm.stateReasonCh:
@@ -949,14 +939,12 @@ func (fsm *fsm) connectLoop(ctx context.Context, wg *sync.WaitGroup) {
 func (fsm *fsm) established(ctx context.Context) (bgp.FSMState, *fsmStateReason) {
 	var wg sync.WaitGroup
 	fsm.lock.Lock()
-	fsm.conn = fsm.conn
 	fsm.lock.Unlock()
 
 	defer wg.Wait()
 	wg.Add(2)
 
 	go fsm.sendMessageloop(ctx, &wg)
-	//fsm.msgCh = fsm.incomingCh
 	go fsm.recvMessageloop(ctx, &wg)
 
 	var holdTimer *time.Timer
@@ -996,12 +984,6 @@ func (fsm *fsm) established(ctx context.Context) (bgp.FSMState, *fsmStateReason)
 			fsm.lock.RUnlock()
 		case err := <-fsm.stateReasonCh:
 			fsm.conn.Close()
-			// if recv goroutine hit an error and sent to
-			// stateReasonCh, then tx goroutine might take
-			// long until it exits because it waits for
-			// ctx.Done() or keepalive timer. So let kill
-			// it now.
-			//fsm.outgoingCh.In() <- err
 			fsm.lock.RLock()
 			if s := fsm.pConf.GracefulRestart.State; s.Enabled {
 				if (s.NotificationEnabled && err.Type == fsmNotificationRecv) ||
@@ -1096,6 +1078,8 @@ func (fsm *fsm) sendMessageloop(ctx context.Context, wg *sync.WaitGroup) error {
 			fsm.bgpMessageStateUpdate(0, false)
 			return nil
 		}
+		klog.Infof(fmt.Sprintf("[sendMessageloop]send msg %s to router", b))
+
 		fsm.lock.RLock()
 		err = conn.SetWriteDeadline(time.Now().Add(time.Second * time.Duration(fsm.pConf.Timers.State.NegotiatedHoldTime)))
 		fsm.lock.RUnlock()
@@ -1640,12 +1624,11 @@ func (fsm *fsm) recvMessageWithError() (*fsmMsg, error) {
 
 func (fsm *fsm) recvMessage(ctx context.Context, wg *sync.WaitGroup) error {
 	defer func() {
-		fsm.msgCh.Close()
 		wg.Done()
 	}()
 	fmsg, _ := fsm.recvMessageWithError()
 	if fmsg != nil {
-		fsm.msgCh.In() <- fmsg
+		fsm.msgCh <- fmsg
 	}
 	return nil
 }

@@ -44,8 +44,6 @@ func (s *BgpServer) ListPath(ctx context.Context, r *api.ListPathRequest, fn fun
 		fallthrough
 	case api.TableType_ADJ_OUT:
 		tbl, filtered, v, err = s.getAdjRib(r.Name, family, in, r.EnableFiltered, f())
-	case api.TableType_VRF:
-		tbl, err = s.getVrfRib(r.Name, family, []*table.LookupPrefix{})
 	default:
 		return fmt.Errorf("unsupported resource type: %v", r.TableType)
 	}
@@ -102,10 +100,7 @@ func (s *BgpServer) addPathList(vrfId string, pathList []*table.Path) error {
 }
 
 func (s *BgpServer) addPathStream(vrfId string, pathList []*table.Path) error {
-	err := s.mgmtOperation(func() error {
-		return s.addPathList(vrfId, pathList)
-	}, true)
-	return err
+	return s.addPathList(vrfId, pathList)
 }
 
 func (s *BgpServer) AddPath(ctx context.Context, r *api.AddPathRequest) (*api.AddPathResponse, error) {
@@ -113,21 +108,24 @@ func (s *BgpServer) AddPath(ctx context.Context, r *api.AddPathRequest) (*api.Ad
 		return nil, fmt.Errorf("nil request")
 	}
 	var uuidBytes []byte
-	err := s.mgmtOperation(func() error {
-		path, err := api2Path(r.TableType, r.Path, false)
-		if err != nil {
-			return err
-		}
-		err = s.addPathList(r.VrfId, []*table.Path{path})
-		if err != nil {
-			return err
-		}
-		if id, err := uuid.NewRandom(); err == nil {
-			s.uuidMap[pathTokey(path)] = id
-			uuidBytes, _ = id.MarshalBinary()
-		}
-		return nil
-	}, true)
+
+	if err := s.active(); err != nil {
+		return nil, err
+	}
+
+	path, err := api2Path(r.TableType, r.Path, false)
+	if err != nil {
+		return nil, err
+	}
+	err = s.addPathList(r.VrfId, []*table.Path{path})
+	if err != nil {
+		return nil, err
+	}
+	if id, err := uuid.NewRandom(); err == nil {
+		s.uuidMap[pathTokey(path)] = id
+		uuidBytes, _ = id.MarshalBinary()
+	}
+
 	return &api.AddPathResponse{Uuid: uuidBytes}, err
 }
 
@@ -135,76 +133,80 @@ func (s *BgpServer) DeletePath(ctx context.Context, r *api.DeletePathRequest) er
 	if r == nil {
 		return fmt.Errorf("nil request")
 	}
-	return s.mgmtOperation(func() error {
-		deletePathList := make([]*table.Path, 0)
 
-		pathList, err := func() ([]*table.Path, error) {
-			if r.Path != nil {
-				path, err := api2Path(r.TableType, r.Path, true)
-				return []*table.Path{path}, err
-			}
-			return []*table.Path{}, nil
-		}()
-		if err != nil {
-			return err
+	if err := s.active(); err != nil {
+		return err
+	}
+
+	deletePathList := make([]*table.Path, 0)
+
+	pathList, err := func() ([]*table.Path, error) {
+		if r.Path != nil {
+			path, err := api2Path(r.TableType, r.Path, true)
+			return []*table.Path{path}, err
 		}
+		return []*table.Path{}, nil
+	}()
+	if err != nil {
+		return err
+	}
 
-		if len(r.Uuid) > 0 {
-			// Delete locally generated path which has the given UUID
-			path := func() *table.Path {
-				id, _ := uuid.FromBytes(r.Uuid)
-				for k, v := range s.uuidMap {
-					if v == id {
-						for _, path := range s.globalRib.GetPathList(table.GLOBAL_RIB_NAME, 0, s.globalRib.GetRFlist()) {
-							if path.IsLocal() && k == pathTokey(path) {
-								delete(s.uuidMap, k)
-								return path
-							}
+	if len(r.Uuid) > 0 {
+		// Delete locally generated path which has the given UUID
+		path := func() *table.Path {
+			id, _ := uuid.FromBytes(r.Uuid)
+			for k, v := range s.uuidMap {
+				if v == id {
+					for _, path := range s.globalRib.GetPathList(table.GLOBAL_RIB_NAME, 0, s.globalRib.GetRFlist()) {
+						if path.IsLocal() && k == pathTokey(path) {
+							delete(s.uuidMap, k)
+							return path
 						}
 					}
 				}
-				return nil
-			}()
-			if path == nil {
-				return fmt.Errorf("can't find a specified path")
 			}
-			deletePathList = append(deletePathList, path.Clone(true))
-		} else if len(pathList) == 0 {
-			// Delete all locally generated paths
-			families := s.globalRib.GetRFlist()
-			if r.Family != nil {
-				families = []bgp.RouteFamily{bgp.AfiSafiToRouteFamily(uint16(r.Family.Afi), uint8(r.Family.Safi))}
+			return nil
+		}()
+		if path == nil {
+			return fmt.Errorf("can't find a specified path")
+		}
+		deletePathList = append(deletePathList, path.Clone(true))
+	} else if len(pathList) == 0 {
+		// Delete all locally generated paths
+		families := s.globalRib.GetRFlist()
+		if r.Family != nil {
+			families = []bgp.RouteFamily{bgp.AfiSafiToRouteFamily(uint16(r.Family.Afi), uint8(r.Family.Safi))}
 
-			}
-			for _, path := range s.globalRib.GetPathList(table.GLOBAL_RIB_NAME, 0, families) {
-				if path.IsLocal() {
-					deletePathList = append(deletePathList, path.Clone(true))
-				}
-			}
-			s.uuidMap = make(map[string]uuid.UUID)
-		} else {
-			if err := s.fixupApiPath(r.VrfId, pathList); err != nil {
-				return err
-			}
-			deletePathList = pathList
-			for _, p := range deletePathList {
-				delete(s.uuidMap, pathTokey(p))
+		}
+		for _, path := range s.globalRib.GetPathList(table.GLOBAL_RIB_NAME, 0, families) {
+			if path.IsLocal() {
+				deletePathList = append(deletePathList, path.Clone(true))
 			}
 		}
-		s.propagateUpdate(nil, deletePathList)
-		return nil
-	}, true)
+		s.uuidMap = make(map[string]uuid.UUID)
+	} else {
+		if err := s.fixupApiPath(r.VrfId, pathList); err != nil {
+			return err
+		}
+		deletePathList = pathList
+		for _, p := range deletePathList {
+			delete(s.uuidMap, pathTokey(p))
+		}
+	}
+	s.propagateUpdate(nil, deletePathList)
+	return nil
 }
 
 func (s *BgpServer) updatePath(vrfId string, pathList []*table.Path) error {
-	err := s.mgmtOperation(func() error {
-		if err := s.fixupApiPath(vrfId, pathList); err != nil {
-			return err
-		}
-		s.propagateUpdate(nil, pathList)
-		return nil
-	}, true)
-	return err
+	if err := s.active(); err != nil {
+		return err
+	}
+
+	if err := s.fixupApiPath(vrfId, pathList); err != nil {
+		return err
+	}
+	s.propagateUpdate(nil, pathList)
+	return nil
 }
 
 func (s *BgpServer) processOutgoingPaths(peer *peer, paths, olds []*table.Path) []*table.Path {

@@ -103,27 +103,11 @@ func (s *server) serve() error {
 }
 
 func (s *server) ListDynamicNeighbor(r *api.ListDynamicNeighborRequest, stream api.GobgpApi_ListDynamicNeighborServer) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	fn := func(dn *api.DynamicNeighbor) {
-		if err := stream.Send(&api.ListDynamicNeighborResponse{DynamicNeighbor: dn}); err != nil {
-			cancel()
-			return
-		}
-	}
-	return s.bgpServer.ListDynamicNeighbor(ctx, r, fn)
+	return nil
 }
 
 func (s *server) ListPeerGroup(r *api.ListPeerGroupRequest, stream api.GobgpApi_ListPeerGroupServer) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	fn := func(pg *api.PeerGroup) {
-		if err := stream.Send(&api.ListPeerGroupResponse{PeerGroup: pg}); err != nil {
-			cancel()
-			return
-		}
-	}
-	return s.bgpServer.ListPeerGroup(ctx, r, fn)
+	return nil
 }
 
 func parseHost(host string) (string, string) {
@@ -845,23 +829,23 @@ func (s *server) UpdatePeer(ctx context.Context, r *api.UpdatePeerRequest) (*api
 }
 
 func (s *server) AddPeerGroup(ctx context.Context, r *api.AddPeerGroupRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.AddPeerGroup(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) DeletePeerGroup(ctx context.Context, r *api.DeletePeerGroupRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.DeletePeerGroup(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) UpdatePeerGroup(ctx context.Context, r *api.UpdatePeerGroupRequest) (*api.UpdatePeerGroupResponse, error) {
-	return s.bgpServer.UpdatePeerGroup(ctx, r)
+	return nil, nil
 }
 
 func (s *server) AddDynamicNeighbor(ctx context.Context, r *api.AddDynamicNeighborRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.AddDynamicNeighbor(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func (s *server) DeleteDynamicNeighbor(ctx context.Context, r *api.DeleteDynamicNeighborRequest) (*empty.Empty, error) {
-	return &empty.Empty{}, s.bgpServer.DeleteDynamicNeighbor(ctx, r)
+	return &empty.Empty{}, nil
 }
 
 func newPrefixFromApiStruct(a *api.Prefix) (*table.Prefix, error) {
