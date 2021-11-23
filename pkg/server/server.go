@@ -171,7 +171,7 @@ func NewBgpServer(opt ...ServerOption) *BgpServer {
 		grpc.EnableTracing = false
 		apiServer := newAPIserver(s, grpc.NewServer(opts.grpcOption...), opts.grpcAddress)
 		go func() {
-			if err := apiServer.serve(); err != nil {
+			if err := apiServer.serve(); err != nil { // 启动一个 grpc server，供 cli 调用
 				log.Fatalf("failed to listen grpc port: %s", err)
 			}
 		}()
